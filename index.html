@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Philippines Weather - Powered by Windy</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#5D5CDE',
+                        windy: '#ff6b35',
+                        'weather-blue': '#1e40af',
+                        'weather-orange': '#ea580c',
+                        'weather-green': '#16a34a'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .windy-gradient {
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+        }
+        .weather-gradient {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .animate-pulse-slow {
+            animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        .animate-float {
+            animation: float 3s ease-in-out infinite;
+        }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-10px); }
+        }
+        .weather-card {
+            backdrop-filter: blur(10px);
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .dark .weather-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .update-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        .windy-widget {
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-orange-400 via-red-500 to-pink-500 dark:from-gray-900 dark:via-orange-900 dark:to-red-900 min-h-screen text-white">
+    <!-- Auto-Update Indicator -->
+    <div id="updateIndicator" class="update-indicator hidden">
+        <div class="bg-windy text-white px-4 py-2 rounded-full shadow-lg flex items-center">
+            <i class="fas fa-sync-alt fa-spin mr-2"></i>
+            <span id="updateText">Auto-updating...</span>
+        </div>
+    </div>
+
+    <!-- Header -->
+    <header class="p-6 md:p-8">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center space-x-4">
+                <div class="windy-gradient p-3 rounded-2xl">
+                    <i class="fas fa-wind text-4xl md:text-5xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-3xl md:text-5xl font-bold">Philippines Weather</h1>
+                    <p class="text-lg md:text-xl opacity-80 flex items-center">
+                        <span class="mr-2">Powered by</span>
+                        <span class="windy-gradient text-transparent bg-clip-text font-bold">Windy</span>
+                        <i class="fas fa-circle text-green-400 text-xs ml-2 animate-pulse" id="liveIndicator"></i>
+                        <span class="text-sm ml-1">Live</span>
+                    </p>
+                    <p class="text-sm opacity-60 flex items-center mt-1">
+                        <i class="fas fa-code mr-2 text-purple-400"></i>
+                        <span>Created by</span>
+                        <span class="font-semibold text-purple-300 ml-1">JL</span>
+                    </p>
+                </div>
+            </div>
+            <div class="text-right">
+                <div class="text-lg md:text-xl opacity-80" id="currentTime"></div>
+                <div class="text-sm md:text-base opacity-60" id="currentDate"></div>
+                <div class="text-xs opacity-50 mt-1">
+                    Next update: <span id="nextUpdate"></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="px-6 md:px-8 pb-8">
+        <div class="max-w-7xl mx-auto">
+            
+            <!-- Primary Windy Integration -->
+            <section class="mb-8">
+                <div class="weather-card rounded-3xl p-6 md:p-8">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-2xl md:text-3xl font-bold flex items-center">
+                            <i class="fas fa-satellite-dish mr-3 text-windy"></i>
+                            Live Windy Weather Map
+                        </h2>
+                        <div class="flex items-center space-x-2">
+                            <div class="bg-green-500 w-3 h-3 rounded-full animate-pulse"></div>
+                            <span class="text-sm">Auto-refresh: 5min</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Enhanced Windy Controls -->
+                    <div class="mb-4">
+                        <div class="flex flex-wrap gap-2 mb-3">
+                            <button onclick="switchWindyLayer('rain')" class="windy-layer-btn bg-blue-500/80 hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm transition-all flex items-center" id="windyRainBtn">
+                                <i class="fas fa-cloud-rain mr-2"></i>Rain & Storms
+                            </button>
+                            <button onclick="switchWindyLayer('wind')" class="windy-layer-btn bg-green-500/80 hover:bg-green-600 text-white px-4 py-2 rounded-lg text-sm transition-all flex items-center" id="windyWindBtn">
+                                <i class="fas fa-wind mr-2"></i>Wind Speed
+                            </button>
+                            <button onclick="switchWindyLayer('temp')" class="windy-layer-btn bg-red-500/80 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm transition-all flex items-center" id="windyTempBtn">
+                                <i class="fas fa-thermometer-half mr-2"></i>Temperature
+                            </button>
+                            <button onclick="switchWindyLayer('waves')" class="windy-layer-btn bg-cyan-500/80 hover:bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm transition-all flex items-center" id="windyWavesBtn">
+                                <i class="fas fa-water mr-2"></i>Ocean Waves
+                            </button>
+                            <button onclick="switchWindyLayer('satellite')" class="windy-layer-btn bg-purple-500/80 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm transition-all flex items-center" id="windySatelliteBtn">
+                                <i class="fas fa-satellite mr-2"></i>Satellite
+                            </button>
+                        </div>
+                        
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="switchWindyForecast('3h')" class="forecast-btn bg-gray-600/80 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs transition-all" id="forecast3h">3H</button>
+                            <button onclick="switchWindyForecast('6h')" class="forecast-btn bg-gray-600/80 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs transition-all" id="forecast6h">6H</button>
+                            <button onclick="switchWindyForecast('12h')" class="forecast-btn bg-gray-600/80 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs transition-all" id="forecast12h">12H</button>
+                            <button onclick="switchWindyForecast('24h')" class="forecast-btn bg-gray-600/80 hover:bg-gray-700 text-white px-3 py-1 rounded text-xs transition-all" id="forecast24h">24H</button>
+                            <button onclick="refreshWindyMap()" class="bg-windy/80 hover:bg-windy text-white px-3 py-1 rounded text-xs transition-all flex items-center">
+                                <i class="fas fa-sync-alt mr-1" id="refreshIcon"></i>Refresh Map
+                            </button>
+                            <button onclick="fetchLiveWeatherData()" class="bg-blue-600/80 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs transition-all flex items-center" id="updateWeatherBtn">
+                                <i class="fas fa-download mr-1" id="updateIcon"></i>Update Weather
+                            </button>
+                            <button onclick="toggleAutoRefresh()" class="bg-primary/80 hover:bg-primary text-white px-3 py-1 rounded text-xs transition-all flex items-center" id="autoRefreshBtn">
+                                <i class="fas fa-play mr-1" id="autoRefreshIcon"></i>Auto: ON
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Main Windy Widget -->
+                    <div class="windy-widget h-96 md:h-[600px] relative">
+                        <iframe 
+                            id="windyWidget"
+                            width="100%" 
+                            height="100%" 
+                            src="https://embed.windy.com/embed2.html?lat=12.879&lon=121.774&detailLat=14.599&detailLon=120.984&width=100%&height=100%&zoom=6&level=surface&overlay=rain&product=ecmwf&menu=&message=true&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1"
+                            frameborder="0"
+                            allowfullscreen>
+                        </iframe>
+                        
+                        <!-- Overlay Info Panel -->
+                        <div class="absolute top-4 left-4 bg-black/70 text-white p-3 rounded-lg text-sm max-w-xs">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-info-circle mr-2 text-blue-400"></i>
+                                <span class="font-semibold">Live Weather Data</span>
+                            </div>
+                            <div class="space-y-1 text-xs">
+                                <div>🌡️ Real-time temperatures</div>
+                                <div>🌧️ Precipitation radar</div>
+                                <div>💨 Wind speed & direction</div>
+                                <div>🌊 Wave height & period</div>
+                                <div>⚡ Storm tracking</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Current Weather Summary -->
+            <section class="mb-8">
+                <div class="grid md:grid-cols-2 gap-6">
+                    <!-- Current Conditions -->
+                    <div class="weather-card rounded-3xl p-6">
+                        <h3 class="text-xl md:text-2xl font-bold mb-4 flex items-center">
+                            <i class="fas fa-map-marker-alt mr-3 text-red-400"></i>
+                            Current Conditions
+                        </h3>
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <div class="text-sm opacity-80" id="currentLocation">Manila, Philippines</div>
+                                <div class="text-4xl md:text-6xl font-bold" id="currentTemp">32°</div>
+                                <div class="text-lg opacity-80 capitalize" id="currentDescription">Partly Cloudy</div>
+                            </div>
+                            <div class="animate-float">
+                                <i class="fas fa-sun text-5xl md:text-6xl text-yellow-400" id="currentIcon"></i>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 text-sm">
+                            <div class="flex items-center">
+                                <i class="fas fa-wind mr-2 text-green-300"></i>
+                                <span id="windSpeed">15 km/h</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-tint mr-2 text-blue-400"></i>
+                                <span id="humidity">75%</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-eye mr-2 text-blue-300"></i>
+                                <span id="visibility">10 km</span>
+                            </div>
+                            <div class="flex items-center">
+                                <i class="fas fa-thermometer-half mr-2 text-orange-300"></i>
+                                <span id="feelsLike">35°</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Data Status -->
+                    <div class="weather-card rounded-3xl p-6">
+                        <h3 class="text-xl md:text-2xl font-bold mb-4 flex items-center">
+                            <i class="fas fa-broadcast-tower mr-3 text-green-400"></i>
+                            Live Data Status
+                        </h3>
+                        <div class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <span class="flex items-center">
+                                    <i class="fas fa-satellite text-blue-400 mr-2"></i>
+                                    Satellite Data
+                                </span>
+                                <span class="text-green-400 flex items-center">
+                                    <i class="fas fa-circle text-xs mr-1 animate-pulse"></i>
+                                    Active
+                                </span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="flex items-center">
+                                    <i class="fas fa-cloud-rain text-blue-400 mr-2"></i>
+                                    Weather Radar
+                                </span>
+                                <span class="text-green-400 flex items-center">
+                                    <i class="fas fa-circle text-xs mr-1 animate-pulse"></i>
+                                    Active
+                                </span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="flex items-center">
+                                    <i class="fas fa-wind text-green-400 mr-2"></i>
+                                    Wind Forecast
+                                </span>
+                                <span class="text-green-400 flex items-center">
+                                    <i class="fas fa-circle text-xs mr-1 animate-pulse"></i>
+                                    Active
+                                </span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="flex items-center">
+                                    <i class="fas fa-sync-alt mr-2"></i>
+                                    Auto-Refresh
+                                </span>
+                                <span class="text-green-400 flex items-center" id="autoRefreshStatus">
+                                    <i class="fas fa-circle text-xs mr-1 animate-pulse"></i>
+                                    Every 5 min
+                                </span>
+                            </div>
+                            <div class="text-xs opacity-60 mt-3">
+                                Last updated: <span id="lastUpdate"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 24-Hour Forecast -->
+            <section class="mb-8">
+                <h3 class="text-2xl md:text-3xl font-bold mb-6 flex items-center">
+                    <i class="fas fa-clock mr-3 text-blue-300"></i>
+                    24-Hour Hourly Forecast
+                </h3>
+                <div class="weather-card rounded-3xl p-6">
+                    <div class="flex overflow-x-auto pb-4 space-x-4" id="hourlyForecast">
+                        <!-- Hourly forecast will be populated here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Regional Updates -->
+            <section>
+                <h3 class="text-2xl md:text-3xl font-bold mb-6 flex items-center">
+                    <i class="fas fa-globe-asia mr-3 text-green-300"></i>
+                    Regional Live Updates
+                </h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="regionalContainer">
+                    <!-- Regional cards will be inserted here -->
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        // Dark mode detection
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+        }
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', event => {
+            if (event.matches) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        });
+
+        // Global variables
+        let autoRefreshEnabled = true;
+        let refreshInterval;
+        let windyRefreshInterval;
+        let currentWindyLayer = 'rain';
+        let nextUpdateTime;
+
+        const weatherData = {
+            current: {
+                location: "Manila, Philippines",
+                temp: 32,
+                description: "Partly Cloudy",
+                icon: "fa-sun",
+                visibility: "10 km",
+                windSpeed: "15 km/h",
+                humidity: "75%",
+                feelsLike: "35°"
+            },
+            hourly: [],
+            regional: [
+                { region: "Luzon", city: "Quezon City", temp: 31, icon: "fa-cloud-sun", desc: "Partly Cloudy", trend: "↗" },
+                { region: "Visayas", city: "Cebu City", temp: 29, icon: "fa-cloud-rain", desc: "Light Rain", trend: "↘" },
+                { region: "Mindanao", city: "Davao City", temp: 28, icon: "fa-cloud", desc: "Cloudy", trend: "→" }
+            ]
+        };
+
+        // Initialize hourly forecast
+        function initializeHourlyForecast() {
+            const hours = [];
+            const now = new Date();
+            
+            for (let i = 0; i < 24; i++) {
+                const hour = new Date(now.getTime() + i * 60 * 60 * 1000);
+                const temp = Math.floor(Math.random() * 8) + 26;
+                const icons = ['fa-sun', 'fa-cloud-sun', 'fa-cloud', 'fa-cloud-rain'];
+                const descriptions = ['Sunny', 'Partly Cloudy', 'Cloudy', 'Light Rain'];
+                const randomIndex = Math.floor(Math.random() * icons.length);
+                
+                hours.push({
+                    time: hour.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }),
+                    temp: temp,
+                    icon: icons[randomIndex],
+                    desc: descriptions[randomIndex],
+                    rain: Math.floor(Math.random() * 30) + '%'
+                });
+            }
+            
+            weatherData.hourly = hours;
+        }
+
+        // Update time and next update countdown
+        function updateTime() {
+            const now = new Date();
+            const timeOptions = { 
+                timeZone: 'Asia/Manila', 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit' 
+            };
+            const dateOptions = { 
+                timeZone: 'Asia/Manila', 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            };
+            
+            document.getElementById('currentTime').textContent = now.toLocaleTimeString('en-PH', timeOptions);
+            document.getElementById('currentDate').textContent = now.toLocaleDateString('en-PH', dateOptions);
+            document.getElementById('lastUpdate').textContent = now.toLocaleTimeString('en-PH', timeOptions);
+
+            // Update next refresh countdown
+            if (nextUpdateTime) {
+                const timeLeft = Math.max(0, Math.ceil((nextUpdateTime - now) / 1000));
+                const minutes = Math.floor(timeLeft / 60);
+                const seconds = timeLeft % 60;
+                document.getElementById('nextUpdate').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+
+        // Update weather display
+        function updateWeatherDisplay() {
+            const current = weatherData.current;
+            
+            document.getElementById('currentLocation').textContent = current.location;
+            document.getElementById('currentTemp').textContent = current.temp + '°';
+            document.getElementById('currentDescription').textContent = current.description;
+            document.getElementById('currentIcon').className = `fas ${current.icon} text-5xl md:text-6xl text-yellow-400`;
+            document.getElementById('visibility').textContent = current.visibility;
+            document.getElementById('windSpeed').textContent = current.windSpeed;
+            document.getElementById('humidity').textContent = current.humidity;
+            document.getElementById('feelsLike').textContent = current.feelsLike;
+
+            // Update hourly forecast
+            const hourlyContainer = document.getElementById('hourlyForecast');
+            hourlyContainer.innerHTML = weatherData.hourly.slice(0, 12).map(hour => `
+                <div class="flex-none bg-white/10 dark:bg-black/20 rounded-xl p-4 text-center min-w-[120px]">
+                    <div class="text-sm opacity-80 mb-2">${hour.time}</div>
+                    <i class="fas ${hour.icon} text-2xl mb-2 text-yellow-400"></i>
+                    <div class="font-bold text-lg mb-1">${hour.temp}°</div>
+                    <div class="text-xs opacity-60">${hour.rain} rain</div>
+                </div>
+            `).join('');
+
+            // Update regional
+            const regionalContainer = document.getElementById('regionalContainer');
+            regionalContainer.innerHTML = weatherData.regional.map(region => `
+                <div class="weather-card rounded-2xl p-6 hover:scale-105 transition-transform">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h4 class="text-xl font-bold">${region.region}</h4>
+                            <p class="text-lg opacity-80">${region.city}</p>
+                        </div>
+                        <div class="text-center">
+                            <i class="fas ${region.icon} text-4xl text-yellow-400"></i>
+                            <div class="text-2xl font-bold mt-2">${region.trend}</div>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="text-3xl font-bold">${region.temp}°</span>
+                        <span class="text-lg opacity-80">${region.desc}</span>
+                    </div>
+                    <div class="mt-3 text-xs opacity-60">
+                        Updated: ${new Date().toLocaleTimeString('en-PH')}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Switch Windy layers
+        function switchWindyLayer(layer) {
+            currentWindyLayer = layer;
+            
+            const baseUrl = 'https://embed.windy.com/embed2.html?lat=12.879&lon=121.774&detailLat=14.599&detailLon=120.984&width=100%&height=100%&zoom=6&level=surface';
+            
+            const layerMap = {
+                'rain': 'rain',
+                'wind': 'wind',
+                'temp': 'temp',
+                'waves': 'waves',
+                'satellite': 'satellite'
+            };
+            
+            const newSrc = `${baseUrl}&overlay=${layerMap[layer]}&product=ecmwf&menu=&message=true&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=&metricWind=default&metricTemp=default&radarRange=-1&timestamp=${Date.now()}`;
+            
+            document.getElementById('windyWidget').src = newSrc;
+            
+            // Update button states
+            document.querySelectorAll('.windy-layer-btn').forEach(btn => {
+                btn.classList.remove('ring-2', 'ring-white');
+            });
+            
+            document.getElementById(`windy${layer.charAt(0).toUpperCase() + layer.slice(1)}Btn`).classList.add('ring-2', 'ring-white');
+            
+            showNotification(`Switched to ${layer} view`, 'info');
+        }
+
+        // Switch forecast timeframe
+        function switchWindyForecast(timeframe) {
+            document.querySelectorAll('.forecast-btn').forEach(btn => {
+                btn.classList.remove('bg-primary');
+                btn.classList.add('bg-gray-600/80');
+            });
+            
+            document.getElementById(`forecast${timeframe}`).classList.remove('bg-gray-600/80');
+            document.getElementById(`forecast${timeframe}`).classList.add('bg-primary');
+            
+            showNotification(`Forecast set to ${timeframe}`, 'info');
+        }
+
+        // Refresh Windy map
+        function refreshWindyMap() {
+            const refreshIcon = document.getElementById('refreshIcon');
+            refreshIcon.classList.add('fa-spin');
+            
+            // Force refresh by adding timestamp
+            const currentSrc = document.getElementById('windyWidget').src;
+            const newSrc = currentSrc.split('&timestamp=')[0] + `&timestamp=${Date.now()}`;
+            document.getElementById('windyWidget').src = newSrc;
+            
+            setTimeout(() => {
+                refreshIcon.classList.remove('fa-spin');
+                showNotification('Map refreshed successfully', 'success');
+            }, 2000);
+        }
+
+        // Toggle auto-refresh
+        function toggleAutoRefresh() {
+            autoRefreshEnabled = !autoRefreshEnabled;
+            const btn = document.getElementById('autoRefreshBtn');
+            const icon = document.getElementById('autoRefreshIcon');
+            const status = document.getElementById('autoRefreshStatus');
+            
+            if (autoRefreshEnabled) {
+                btn.innerHTML = '<i class="fas fa-pause mr-1"></i>Auto: ON';
+                icon.className = 'fas fa-pause mr-1';
+                status.innerHTML = '<i class="fas fa-circle text-xs mr-1 animate-pulse"></i>Every 5 min';
+                startAutoRefresh();
+                showNotification('Auto-refresh enabled', 'success');
+            } else {
+                btn.innerHTML = '<i class="fas fa-play mr-1"></i>Auto: OFF';
+                icon.className = 'fas fa-play mr-1';
+                status.innerHTML = '<i class="fas fa-circle text-xs mr-1 text-gray-400"></i>Disabled';
+                stopAutoRefresh();
+                showNotification('Auto-refresh disabled', 'info');
+            }
+        }
+
+        // Start auto-refresh
+        function startAutoRefresh() {
+            if (!autoRefreshEnabled) return;
+            
+            // Clear existing intervals
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (windyRefreshInterval) clearInterval(windyRefreshInterval);
+            
+            // Weather data refresh every 5 minutes
+            refreshInterval = setInterval(() => {
+                if (autoRefreshEnabled) {
+                    showUpdateIndicator('Updating weather data...');
+                    fetchLiveWeatherData();
+                }
+            }, 300000); // 5 minutes
+            
+            // Windy map refresh every 10 minutes
+            windyRefreshInterval = setInterval(() => {
+                if (autoRefreshEnabled) {
+                    showUpdateIndicator('Refreshing Windy map...');
+                    refreshWindyMap();
+                }
+            }, 600000); // 10 minutes
+            
+            // Set next update time
+            nextUpdateTime = new Date(Date.now() + 300000); // 5 minutes from now
+        }
+
+        // Stop auto-refresh
+        function stopAutoRefresh() {
+            if (refreshInterval) clearInterval(refreshInterval);
+            if (windyRefreshInterval) clearInterval(windyRefreshInterval);
+            nextUpdateTime = null;
+        }
+
+        // Show update indicator
+        function showUpdateIndicator(message) {
+            const indicator = document.getElementById('updateIndicator');
+            const text = document.getElementById('updateText');
+            text.textContent = message;
+            indicator.classList.remove('hidden');
+            
+            setTimeout(() => {
+                indicator.classList.add('hidden');
+            }, 3000);
+        }
+
+        // Real weather API configuration
+        const WEATHER_CONFIG = {
+            // Get free API key from: https://openweathermap.org/api
+            API_KEY: 'YOUR_API_KEY_HERE', // Replace with your actual API key
+            BASE_URL: 'https://api.openweathermap.org/data/2.5',
+            CITIES: {
+                manila: { name: 'Manila', lat: 14.5995, lon: 120.9842, region: 'Luzon' },
+                quezon: { name: 'Quezon City', lat: 14.6760, lon: 121.0437, region: 'Luzon' },
+                cebu: { name: 'Cebu City', lat: 10.3157, lon: 123.8854, region: 'Visayas' },
+                davao: { name: 'Davao City', lat: 7.1907, lon: 125.4553, region: 'Mindanao' }
+            }
+        };
+
+        // Convert weather condition to icon
+        function getWeatherIcon(weatherMain, weatherId) {
+            const iconMap = {
+                'Clear': 'fa-sun',
+                'Clouds': weatherId === 801 ? 'fa-cloud-sun' : 'fa-cloud',
+                'Rain': weatherId >= 500 && weatherId < 520 ? 'fa-cloud-rain' : 'fa-cloud-showers-heavy',
+                'Drizzle': 'fa-cloud-rain',
+                'Thunderstorm': 'fa-bolt',
+                'Snow': 'fa-snowflake',
+                'Mist': 'fa-smog',
+                'Fog': 'fa-smog',
+                'Haze': 'fa-smog'
+            };
+            return iconMap[weatherMain] || 'fa-cloud';
+        }
+
+        // Get trend arrow based on pressure change
+        function getTrendArrow(pressure) {
+            if (pressure > 1015) return '↗';
+            if (pressure < 1010) return '↘';
+            return '→';
+        }
+
+        // Fetch real weather data from OpenWeatherMap API
+        async function fetchLiveWeatherData() {
+            try {
+                showUpdateIndicator('Fetching live weather data from OpenWeatherMap...');
+
+                // Check if API key is set
+                if (WEATHER_CONFIG.API_KEY === 'YOUR_API_KEY_HERE') {
+                    throw new Error('API key not configured. Please get your free API key from OpenWeatherMap.');
+                }
+
+                // Fetch current weather for all cities
+                const weatherPromises = Object.entries(WEATHER_CONFIG.CITIES).map(async ([key, city]) => {
+                    const url = `${WEATHER_CONFIG.BASE_URL}/weather?lat=${city.lat}&lon=${city.lon}&appid=${WEATHER_CONFIG.API_KEY}&units=metric`;
+                    const response = await fetch(url);
+                    
+                    if (!response.ok) {
+                        throw new Error(`Weather API error: ${response.status}`);
+                    }
+                    
+                    const data = await response.json();
+                    return { key, city, data };
+                });
+
+                // Fetch hourly forecast for Manila
+                const forecastUrl = `${WEATHER_CONFIG.BASE_URL}/forecast?lat=${WEATHER_CONFIG.CITIES.manila.lat}&lon=${WEATHER_CONFIG.CITIES.manila.lon}&appid=${WEATHER_CONFIG.API_KEY}&units=metric`;
+                const forecastResponse = await fetch(forecastUrl);
+                
+                if (!forecastResponse.ok) {
+                    throw new Error(`Forecast API error: ${forecastResponse.status}`);
+                }
+                
+                const forecastData = await forecastResponse.json();
+
+                // Wait for all weather data
+                const allWeatherData = await Promise.all(weatherPromises);
+                
+                // Process Manila (main) weather
+                const manilaWeather = allWeatherData.find(item => item.key === 'manila');
+                if (manilaWeather) {
+                    const data = manilaWeather.data;
+                    weatherData.current = {
+                        location: `${data.name}, Philippines`,
+                        temp: Math.round(data.main.temp),
+                        description: data.weather[0].description,
+                        icon: getWeatherIcon(data.weather[0].main, data.weather[0].id),
+                        visibility: Math.round(data.visibility / 1000) + " km",
+                        windSpeed: Math.round(data.wind.speed * 3.6) + " km/h", // Convert m/s to km/h
+                        humidity: data.main.humidity + "%",
+                        feelsLike: Math.round(data.main.feels_like) + "°"
+                    };
+                }
+
+                // Process regional weather
+                weatherData.regional = [];
+                
+                const regionalCities = ['quezon', 'cebu', 'davao'];
+                regionalCities.forEach(cityKey => {
+                    const cityWeather = allWeatherData.find(item => item.key === cityKey);
+                    if (cityWeather) {
+                        const data = cityWeather.data;
+                        weatherData.regional.push({
+                            region: cityWeather.city.region,
+                            city: cityWeather.city.name,
+                            temp: Math.round(data.main.temp),
+                            icon: getWeatherIcon(data.weather[0].main, data.weather[0].id),
+                            desc: data.weather[0].description,
+                            trend: getTrendArrow(data.main.pressure)
+                        });
+                    }
+                });
+
+                // Process hourly forecast
+                weatherData.hourly = [];
+                const hourlyData = forecastData.list.slice(0, 24); // Next 24 hours (3-hour intervals)
+                
+                hourlyData.forEach(item => {
+                    const date = new Date(item.dt * 1000);
+                    weatherData.hourly.push({
+                        time: date.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' }),
+                        temp: Math.round(item.main.temp),
+                        icon: getWeatherIcon(item.weather[0].main, item.weather[0].id),
+                        desc: item.weather[0].description,
+                        rain: item.rain ? Math.round(item.rain['3h'] || 0) + 'mm' : '0mm'
+                    });
+                });
+
+                // Update display
+                updateWeatherDisplay();
+                nextUpdateTime = new Date(Date.now() + 300000); // Reset countdown
+                
+                showNotification('Live weather data updated successfully!', 'success');
+
+            } catch (error) {
+                console.error('Error fetching live weather data:', error);
+                
+                // Fallback to simulated data if API fails
+                showNotification(`API Error: ${error.message}. Using simulated data.`, 'error');
+                await fetchSimulatedWeatherData();
+            }
+        }
+
+        // Fallback: Simulated weather data (original function)
+        async function fetchSimulatedWeatherData() {
+            try {
+                showUpdateIndicator('Using simulated weather data...');
+
+                // Simulate network delay
+                await new Promise(resolve => setTimeout(resolve, 1000));
+
+                // Simulate real weather data variations
+                const currentTemp = Math.floor(Math.random() * 10) + 26; // 26-35°C
+                const weatherConditions = [
+                    { desc: "Sunny", icon: "fa-sun" },
+                    { desc: "Partly Cloudy", icon: "fa-cloud-sun" },
+                    { desc: "Cloudy", icon: "fa-cloud" },
+                    { desc: "Light Rain", icon: "fa-cloud-rain" },
+                    { desc: "Heavy Rain", icon: "fa-cloud-showers-heavy" },
+                    { desc: "Thunderstorm", icon: "fa-bolt" }
+                ];
+
+                const currentCondition = weatherConditions[Math.floor(Math.random() * weatherConditions.length)];
+                
+                // Update weather data with realistic variations
+                weatherData.current = {
+                    location: "Manila, Philippines",
+                    temp: currentTemp,
+                    description: currentCondition.desc,
+                    icon: currentCondition.icon,
+                    visibility: Math.floor(Math.random() * 15) + 5 + " km",
+                    windSpeed: Math.floor(Math.random() * 20) + 5 + " km/h",
+                    humidity: Math.floor(Math.random() * 30) + 60 + "%",
+                    feelsLike: (currentTemp + Math.floor(Math.random() * 6) - 2) + "°"
+                };
+
+                // Update regional data
+                weatherData.regional = [
+                    { 
+                        region: "Luzon", 
+                        city: "Quezon City", 
+                        temp: Math.floor(Math.random() * 8) + 26, 
+                        icon: weatherConditions[Math.floor(Math.random() * weatherConditions.length)].icon, 
+                        desc: weatherConditions[Math.floor(Math.random() * weatherConditions.length)].desc, 
+                        trend: ["↗", "↘", "→"][Math.floor(Math.random() * 3)]
+                    },
+                    { 
+                        region: "Visayas", 
+                        city: "Cebu City", 
+                        temp: Math.floor(Math.random() * 6) + 27, 
+                        icon: weatherConditions[Math.floor(Math.random() * weatherConditions.length)].icon, 
+                        desc: weatherConditions[Math.floor(Math.random() * weatherConditions.length)].desc, 
+                        trend: ["↗", "↘", "→"][Math.floor(Math.random() * 3)]
+                    },
+                    { 
+                        region: "Mindanao", 
+                        city: "Davao City", 
+                        temp: Math.floor(Math.random() * 6) + 25, 
+                        icon: weatherConditions[Math.floor(Math.random() * weatherConditions.length)].icon, 
+                        desc: weatherConditions[Math.floor(Math.random() * weatherConditions.length)].desc, 
+                        trend: ["↗", "↘", "→"][Math.floor(Math.random() * 3)]
+                    }
+                ];
+
+                // Update hourly forecast
+                initializeHourlyForecast();
+                
+                // Update display
+                updateWeatherDisplay();
+                nextUpdateTime = new Date(Date.now() + 300000); // Reset countdown
+                
+                showNotification('Simulated weather data updated!', 'info');
+
+            } catch (error) {
+                console.error('Error in fetchSimulatedWeatherData:', error);
+                showNotification('Failed to update weather data', 'error');
+            }
+        }
+
+        // Manual update button with animation
+        function manualUpdate() {
+            const btn = document.getElementById('updateWeatherBtn');
+            const icon = document.getElementById('updateIcon');
+            
+            btn.disabled = true;
+            icon.classList.add('fa-spin');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Updating...';
+            
+            fetchLiveWeatherData().finally(() => {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    icon.classList.remove('fa-spin');
+                    btn.innerHTML = '<i class="fas fa-download mr-1"></i>Update Weather';
+                }, 1000);
+            });
+        }
+
+        // Show notification
+        function showNotification(message, type = 'info') {
+            const notification = document.createElement('div');
+            const bgColor = type === 'error' ? 'bg-red-500' : type === 'success' ? 'bg-green-500' : 'bg-blue-500';
+            const icon = type === 'error' ? 'fa-exclamation-triangle' : type === 'success' ? 'fa-check-circle' : 'fa-info-circle';
+            
+            notification.className = `fixed bottom-4 right-4 z-50 p-4 rounded-lg text-white max-w-sm ${bgColor} transform transition-all duration-300 translate-x-full`;
+            notification.innerHTML = `
+                <div class="flex items-center">
+                    <i class="fas ${icon} mr-2"></i>
+                    <span>${message}</span>
+                </div>
+            `;
+            
+            document.body.appendChild(notification);
+            
+            // Animate in
+            setTimeout(() => {
+                notification.classList.remove('translate-x-full');
+            }, 100);
+            
+            // Animate out and remove
+            setTimeout(() => {
+                notification.classList.add('translate-x-full');
+                setTimeout(() => notification.remove(), 300);
+            }, 4000);
+        }
+
+        // Initialize everything
+        function initialize() {
+            updateTime();
+            initializeHourlyForecast();
+            updateWeatherDisplay();
+            startAutoRefresh();
+            
+            // Set default Windy layer
+            switchWindyLayer('rain');
+            switchWindyForecast('6h');
+            
+            // Initial weather data fetch
+            setTimeout(() => {
+                fetchLiveWeatherData();
+            }, 2000);
+        }
+
+        // Start everything
+        initialize();
+        setInterval(updateTime, 1000);
+
+        // Show welcome message
+        setTimeout(() => {
+            showNotification('Welcome to Philippines Weather powered by Windy! Auto-updates are active.', 'success');
+        }, 1000);
+    </script>
+</body>
+</html>
